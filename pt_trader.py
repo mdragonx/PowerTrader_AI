@@ -352,11 +352,8 @@ class CryptoAPITrading:
 
         self.api_key = API_KEY
         self.api_secret = API_SECRET
-        self.quote_currency = BITSO_QUOTE_CURRENCY or "MXN"
+        self.quote_currency = BITSO_QUOTE_CURRENCY or "USD"
         self.base_url = "https://api.bitso.com"
-
-        if not hasattr(self, "_symbol_with_quote"):
-            self._symbol_with_quote = lambda base_symbol: f"{str(base_symbol or '').strip().upper()}-{(self.quote_currency or 'MXN').strip().upper()}"
 
         self.dca_levels_triggered = {}  # Track DCA levels for each crypto
         self.dca_levels = list(DCA_LEVELS)  # Hard DCA triggers (percent PnL)
@@ -418,15 +415,6 @@ class CryptoAPITrading:
             base = raw
         quote = self.quote_currency
         return f"{base.lower()}_{quote.lower()}"
-
-    def _symbol_with_quote(self, base_symbol: str) -> str:
-        base = str(base_symbol or "").strip().upper()
-        quote = str(self.quote_currency or "").strip().upper()
-        if not base:
-            return ""
-        if not quote:
-            quote = "MXN"
-        return f"{base}-{quote}"
 
     @staticmethod
     def _build_orders_from_trades(trades: list) -> list:
@@ -1355,9 +1343,8 @@ class CryptoAPITrading:
         sell_prices = {}
         valid_symbols = []
 
-        skip_symbol = self._symbol_with_quote("USDC")
         for symbol in symbols:
-            if symbol == skip_symbol:
+            if symbol == "USDC-USD":
                 continue
 
             book = self._symbol_to_book(symbol)
@@ -1501,6 +1488,17 @@ class CryptoAPITrading:
 
             except Exception:
                 pass #print(traceback.format_exc())
+
+            # Check for precision errors
+            if response and isinstance(response, dict):
+                error = response.get("error", "") or ""
+                if "precision" in error:
+                    asset_quantity = round(asset_quantity, 6)
+                elif "minimum" in error or "min" in error:
+                    return None
+
+        return None
+
 
             # Check for precision errors
             if response and isinstance(response, dict):
