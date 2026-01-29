@@ -21,7 +21,7 @@ import uuid
 #   use payload["ask"]
 # -----------------------------
 BITSO_BASE_URL = "https://api.bitso.com"
-BITSO_QUOTE_CURRENCY = os.environ.get("BITSO_QUOTE_CURRENCY", "USD").strip().upper()
+BITSO_QUOTE_CURRENCY = os.environ.get("BITSO_QUOTE_CURRENCY", "MXN").strip().upper()
 
 
 def _symbol_to_book(symbol: str) -> str:

@@ -321,7 +321,7 @@ def _refresh_paths_and_symbols():
 # API STUFF (Bitso)
 API_KEY = os.environ.get("BITSO_API_KEY", "").strip()
 API_SECRET = os.environ.get("BITSO_API_SECRET", "").strip()
-BITSO_QUOTE_CURRENCY = os.environ.get("BITSO_QUOTE_CURRENCY", "USD").strip().upper()
+BITSO_QUOTE_CURRENCY = os.environ.get("BITSO_QUOTE_CURRENCY", "MXN").strip().upper()
 
 if not API_KEY:
     try:
@@ -1228,13 +1228,19 @@ class CryptoAPITrading:
         balances = payload.get("balances", []) or []
         buying_power = 0.0
         quote = self.quote_currency.lower()
+        mxn_available = 0.0
         for balance in balances:
-            if str(balance.get("currency", "")).lower() == quote:
-                try:
-                    buying_power = float(balance.get("available", 0.0) or 0.0)
-                except Exception:
-                    buying_power = 0.0
-                break
+            currency = str(balance.get("currency", "")).lower()
+            try:
+                available = float(balance.get("available", 0.0) or 0.0)
+            except Exception:
+                available = 0.0
+            if currency == quote:
+                buying_power = available
+            if currency == "mxn":
+                mxn_available = available
+        if buying_power <= 0.0 and quote != "mxn":
+            buying_power = mxn_available
         return {
             "buying_power": buying_power,
             "raw": payload,

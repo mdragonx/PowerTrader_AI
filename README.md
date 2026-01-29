@@ -123,7 +123,7 @@ After saving, you will have two files in your PowerTrader AI folder:
 `bitso_key.txt` and `bitso_secret.txt`  
 Keep them private.
 
-Optional: set `BITSO_QUOTE_CURRENCY` if you want to trade against a different quote (default is USD). For example, set it to `MXN` to trade the MXN books on Bitso.
+Optional: set `BITSO_QUOTE_CURRENCY` if you want to trade against a different quote (default is MXN). For example, set it to `USD` to trade the USD books on Bitso.
 
 PowerTrader AI uses a simple folder style:  
 **BTC uses the main folder**, and other coins use their own subfolders (like `ETH\`).
