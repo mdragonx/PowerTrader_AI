@@ -1500,7 +1500,7 @@ class CryptoAPITrading:
                     return response  # Successfully placed (and fully filled) order
 
             except Exception:
-                pass #print(traceback.format_exc())
+                pass  # print(traceback.format_exc())
 
             # Check for precision errors
             if response and isinstance(response, dict):
