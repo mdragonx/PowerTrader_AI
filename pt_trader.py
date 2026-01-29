@@ -352,7 +352,7 @@ class CryptoAPITrading:
 
         self.api_key = API_KEY
         self.api_secret = API_SECRET
-        self.quote_currency = BITSO_QUOTE_CURRENCY or "MXN"
+        self.quote_currency = BITSO_QUOTE_CURRENCY or "USD"
         self.base_url = "https://api.bitso.com"
 
         self.dca_levels_triggered = {}  # Track DCA levels for each crypto
@@ -415,15 +415,6 @@ class CryptoAPITrading:
             base = raw
         quote = self.quote_currency
         return f"{base.lower()}_{quote.lower()}"
-
-    def _symbol_with_quote(self, base_symbol: str) -> str:
-        base = str(base_symbol or "").strip().upper()
-        quote = str(self.quote_currency or "").strip().upper()
-        if not base:
-            return ""
-        if not quote:
-            quote = "MXN"
-        return f"{base}-{quote}"
 
     @staticmethod
     def _build_orders_from_trades(trades: list) -> list:
@@ -1018,7 +1009,7 @@ class CryptoAPITrading:
         for holding in holdings.get("results", []):
             symbol = holding["asset_code"]
 
-            full_symbol = self._symbol_with_quote(symbol)
+            full_symbol = f"{symbol}-USD"
             orders = self.get_orders(full_symbol)
             
             if not orders or "results" not in orders:
@@ -1307,7 +1298,7 @@ class CryptoAPITrading:
         cost_basis = {}
 
         for asset_code in active_assets:
-            orders = self.get_orders(self._symbol_with_quote(asset_code))
+            orders = self.get_orders(f"{asset_code}-USD")
             if not orders or "results" not in orders:
                 continue
 
@@ -1352,9 +1343,8 @@ class CryptoAPITrading:
         sell_prices = {}
         valid_symbols = []
 
-        skip_symbol = self._symbol_with_quote("USDC")
         for symbol in symbols:
-            if symbol == skip_symbol:
+            if symbol == "USDC-USD":
                 continue
 
             book = self._symbol_to_book(symbol)
@@ -1722,11 +1712,11 @@ class CryptoAPITrading:
         # Use the stored cost_basis instead of recalculating
         cost_basis = self.cost_basis
         # Fetch current prices
-        symbols = [self._symbol_with_quote(holding["asset_code"]) for holding in holdings.get("results", [])]
+        symbols = [holding["asset_code"] + "-USD" for holding in holdings.get("results", [])]
 
         # ALSO fetch prices for tracked coins even if not currently held (so GUI can show bid/ask lines)
         for s in crypto_symbols:
-            full = self._symbol_with_quote(s)
+            full = f"{s}-USD"
             if full not in symbols:
                 symbols.append(full)
 
@@ -1765,7 +1755,7 @@ class CryptoAPITrading:
                 if qty <= 0.0:
                     continue
 
-                sym = self._symbol_with_quote(asset)
+                sym = f"{asset}-USD"
                 bp = float(current_buy_prices.get(sym, 0.0) or 0.0)
                 sp = float(current_sell_prices.get(sym, 0.0) or 0.0)
 
@@ -1816,7 +1806,7 @@ class CryptoAPITrading:
         positions = {}
         for holding in holdings.get("results", []):
             symbol = holding["asset_code"]
-            full_symbol = self._symbol_with_quote(symbol)
+            full_symbol = f"{symbol}-USD"
 
             if full_symbol not in valid_symbols or symbol == "USDC":
                 continue
@@ -2165,7 +2155,7 @@ class CryptoAPITrading:
                 if sym in positions:
                     continue
 
-                full_symbol = self._symbol_with_quote(sym)
+                full_symbol = f"{sym}-USD"
                 if full_symbol not in valid_symbols or sym == "USDC":
                     continue
 
@@ -2212,12 +2202,12 @@ class CryptoAPITrading:
             allocation_in_usd = 0.5
 
 
-        holding_full_symbols = [self._symbol_with_quote(h["asset_code"]) for h in holdings.get("results", [])]
+        holding_full_symbols = [f"{h['asset_code']}-USD" for h in holdings.get("results", [])]
 
         start_index = 0
         while start_index < len(crypto_symbols):
             base_symbol = crypto_symbols[start_index].upper().strip()
-            full_symbol = self._symbol_with_quote(base_symbol)
+            full_symbol = f"{base_symbol}-USD"
 
             # Skip if already held
             if full_symbol in holding_full_symbols:
@@ -2265,7 +2255,7 @@ class CryptoAPITrading:
                 )
                 time.sleep(5)
                 holdings = self.get_holdings()
-                holding_full_symbols = [self._symbol_with_quote(h["asset_code"]) for h in holdings.get("results", [])]
+                holding_full_symbols = [f"{h['asset_code']}-USD" for h in holdings.get("results", [])]
 
 
             start_index += 1
