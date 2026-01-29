@@ -1487,29 +1487,7 @@ class CryptoAPITrading:
                     return response  # Successfully placed (and fully filled) order
 
             except Exception:
-                pass  # print(traceback.format_exc())
-
-            # Check for precision errors
-            if response and isinstance(response, dict):
-                error = response.get("error", "") or ""
-                if "precision" in error:
-                    asset_quantity = round(asset_quantity, 6)
-                elif "minimum" in error or "min" in error:
-                    return None
-
-        return None
-
-
-            # Check for precision errors
-            if response and isinstance(response, dict):
-                error = response.get("error", "") or ""
-                if "precision" in error:
-                    asset_quantity = round(asset_quantity, 6)
-                elif "minimum" in error or "min" in error:
-                    return None
-
-        return None
-
+                pass #print(traceback.format_exc())
 
             # Check for precision errors
             if response and isinstance(response, dict):
