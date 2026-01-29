@@ -47,7 +47,7 @@ For determining when to sell, the bot uses a trailing profit margin to maximize 
 
 THESE INSTRUCTIONS WERE WRITTEN BY AI! PLEASE LET ME KNOW IF THERE ARE ANY ERRORS OR ISSUES WITH THIS SETUP PROCESS!
 
-If you have any crypto holdings in Robinhood currently, either transfer them out of your Robinhood account or sell them to dollars BEFORE going through this setup process!
+If you have any crypto holdings in Bitso currently, either transfer them out of your Bitso account or sell them to the quote currency BEFORE going through this setup process!
 
 This page walks you through installing PowerTrader AI from start to finish, in the exact order a first-time user should do it.  
 No coding knowledge needed.  
@@ -103,7 +103,7 @@ This is the only thing you need to run day-to-day.
 
 ---
 
-## Step 5 — Set your folder, coins, and Robinhood keys (inside the Hub)
+## Step 5 — Set your folder, coins, and Bitso keys (inside the Hub)
 
 ### Open Settings
 
@@ -111,20 +111,19 @@ In the Hub, open **Settings** and do this in order:
 
 - **Main Neural Folder**: set this to the same folder that contains `pt_hub.py` (recommended easiest).
 - **Choose which coins to trade**: start with **BTC**.
-- **While you are still in Settings**, click **Robinhood API Setup** and do this:
+- **While you are still in Settings**, click **Bitso API Setup** and do this:
 
-1. Click **Generate Keys**.
-2. Copy the **Public Key** shown in the wizard.
-3. On Robinhood, add a new API key and paste that Public Key.
-4. Set permissions to allow trading (the wizard tells you what to select).
-5. Robinhood will show your API Key (often starts with `rh`). Copy it.
-6. Paste the API Key back into the wizard and click **Save**.
-7. Close the wizard and go back to the **Settings** screen.
-8. **NOW** click **Save** in Settings.
+1. Create API keys in your Bitso account (API keys page).
+2. Paste the **API Key** and **API Secret** into the wizard.
+3. Click **Save**.
+4. Close the wizard and go back to the **Settings** screen.
+5. **NOW** click **Save** in Settings.
 
 After saving, you will have two files in your PowerTrader AI folder:  
-`r_key.txt` and `r_secret.txt`  
+`bitso_key.txt` and `bitso_secret.txt`  
 Keep them private.
+
+Optional: set `BITSO_QUOTE_CURRENCY` if you want to trade against a different quote (default is USD). For example, set it to `MXN` to trade the MXN books on Bitso.
 
 PowerTrader AI uses a simple folder style:  
 **BTC uses the main folder**, and other coins use their own subfolders (like `ETH\`).
