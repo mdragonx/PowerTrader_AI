@@ -352,7 +352,7 @@ class CryptoAPITrading:
 
         self.api_key = API_KEY
         self.api_secret = API_SECRET
-        self.quote_currency = BITSO_QUOTE_CURRENCY or "MXN"
+        self.quote_currency = BITSO_QUOTE_CURRENCY or "USD"
         self.base_url = "https://api.bitso.com"
 
         self.dca_levels_triggered = {}  # Track DCA levels for each crypto
@@ -415,15 +415,6 @@ class CryptoAPITrading:
             base = raw
         quote = self.quote_currency
         return f"{base.lower()}_{quote.lower()}"
-
-    def _symbol_with_quote(self, base_symbol: str) -> str:
-        base = str(base_symbol or "").strip().upper()
-        quote = str(self.quote_currency or "").strip().upper()
-        if not base:
-            return ""
-        if not quote:
-            quote = "MXN"
-        return f"{base}-{quote}"
 
     @staticmethod
     def _build_orders_from_trades(trades: list) -> list:
@@ -1352,9 +1343,8 @@ class CryptoAPITrading:
         sell_prices = {}
         valid_symbols = []
 
-        skip_symbol = self._symbol_with_quote("USDC")
         for symbol in symbols:
-            if symbol == skip_symbol:
+            if symbol == "USDC-USD":
                 continue
 
             book = self._symbol_to_book(symbol)
