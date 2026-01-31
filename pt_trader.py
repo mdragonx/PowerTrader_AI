@@ -321,7 +321,7 @@ def _refresh_paths_and_symbols():
 # API STUFF (BITSO)
 API_KEY = ""
 API_SECRET = ""
-QUOTE_CURRENCY = os.environ.get("POWERTRADER_QUOTE_CURRENCY", "USD").upper().strip() or "USD"
+QUOTE_CURRENCY = os.environ.get("POWERTRADER_QUOTE_CURRENCY", "MXN").upper().strip() or "MXN"
 
 try:
     with open("bitso_key.txt", "r", encoding="utf-8") as f:
@@ -338,7 +338,7 @@ if not API_KEY or not API_SECRET:
         "Create API keys on Bitso and save them as:\n"
         "  - bitso_key.txt\n"
         "  - bitso_secret.txt\n"
-        "You can also set POWERTRADER_QUOTE_CURRENCY (default: USD).\n"
+        "You can also set POWERTRADER_QUOTE_CURRENCY (default: MXN).\n"
     )
     raise SystemExit(1)
 
