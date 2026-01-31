@@ -10,6 +10,7 @@ import subprocess
 import shutil
 import glob
 import bisect
+import warnings
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 import tkinter as tk
@@ -579,6 +580,12 @@ class CandleFetcher:
         self._mode = "kucoin_client"
         self._market = None
         try:
+            warnings.filterwarnings(
+                "ignore",
+                message="pkg_resources is deprecated as an API\\.",
+                category=UserWarning,
+                module="kucoin",
+            )
             from kucoin.client import Market  # type: ignore
             self._market = Market(url="https://api.kucoin.com")
         except Exception:
