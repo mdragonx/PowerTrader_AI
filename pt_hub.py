@@ -10,6 +10,7 @@ import subprocess
 import shutil
 import glob
 import bisect
+import warnings
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 import tkinter as tk
@@ -579,6 +580,12 @@ class CandleFetcher:
         self._mode = "kucoin_client"
         self._market = None
         try:
+            warnings.filterwarnings(
+                "ignore",
+                message="pkg_resources is deprecated as an API\\.",
+                category=UserWarning,
+                module="kucoin",
+            )
             from kucoin.client import Market  # type: ignore
             self._market = Market(url="https://api.kucoin.com")
         except Exception:
@@ -1173,10 +1180,18 @@ class CandleChart(ttk.Frame):
 # -----------------------------
 
 class AccountValueChart(ttk.Frame):
-    def __init__(self, parent: tk.Widget, history_path: str, trade_history_path: str, max_points: int = 250):
+    def __init__(
+        self,
+        parent: tk.Widget,
+        history_path: str,
+        trade_history_path: str,
+        trader_status_path: Optional[str] = None,
+        max_points: int = 250,
+    ):
         super().__init__(parent)
         self.history_path = history_path
         self.trade_history_path = trade_history_path
+        self.trader_status_path = trader_status_path
         # Hard-cap to 250 points max (account value chart only)
         self.max_points = min(int(max_points or 0) or 250, 250)
         self._last_mtime: Optional[float] = None
@@ -1272,8 +1287,12 @@ class AccountValueChart(ttk.Frame):
             m_trades = os.path.getmtime(self.trade_history_path) if self.trade_history_path else None
         except Exception:
             m_trades = None
+        try:
+            m_status = os.path.getmtime(self.trader_status_path) if self.trader_status_path else None
+        except Exception:
+            m_status = None
 
-        candidates = [m for m in (m_hist, m_trades) if m is not None]
+        candidates = [m for m in (m_hist, m_trades, m_status) if m is not None]
         mtime = max(candidates) if candidates else None
 
         if mtime is not None and self._last_mtime == mtime:
@@ -1309,6 +1328,20 @@ class AccountValueChart(ttk.Frame):
                         continue
         except Exception:
             points = []
+
+        if not points and self.trader_status_path and os.path.isfile(self.trader_status_path):
+            try:
+                status = _safe_read_json(self.trader_status_path)
+                acct = status.get("account", {}) if isinstance(status, dict) else {}
+                ts = status.get("timestamp", None)
+                total_val = acct.get("total_account_value", None)
+                if ts is not None and total_val is not None:
+                    tsf = float(ts)
+                    vf = float(total_val)
+                    if math.isfinite(tsf) and math.isfinite(vf):
+                        points.append((tsf, vf))
+            except Exception:
+                pass
 
         # ---- Clean up history so single-tick bogus dips/spikes don't render ----
         if points:
@@ -2690,6 +2723,7 @@ class PowerTraderHub(tk.Tk):
             acct_page,
             self.account_value_history_path,
             self.trade_history_path,
+            trader_status_path=self.trader_status_path,
         )
         self.account_chart.pack(fill="both", expand=True)
 
@@ -4337,6 +4371,7 @@ class PowerTraderHub(tk.Tk):
             acct_page,
             self.account_value_history_path,
             self.trade_history_path,
+            trader_status_path=self.trader_status_path,
         )
         self.account_chart.pack(fill="both", expand=True)
 
