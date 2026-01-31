@@ -321,7 +321,12 @@ def _refresh_paths_and_symbols():
 # API STUFF (BITSO)
 API_KEY = ""
 API_SECRET = ""
-QUOTE_CURRENCY = os.environ.get("POWERTRADER_QUOTE_CURRENCY", "MXN").upper().strip() or "MXN"
+PRIMARY_CURRENCY = "MXN"
+SECONDARY_CURRENCY = "USD"
+QUOTE_CURRENCY = os.environ.get("POWERTRADER_QUOTE_CURRENCY", PRIMARY_CURRENCY).upper().strip() or PRIMARY_CURRENCY
+if QUOTE_CURRENCY != PRIMARY_CURRENCY:
+    print(f"[PowerTrader] Forcing quote currency to {PRIMARY_CURRENCY} (requested {QUOTE_CURRENCY}).")
+    QUOTE_CURRENCY = PRIMARY_CURRENCY
 
 try:
     with open("bitso_key.txt", "r", encoding="utf-8") as f:
@@ -351,6 +356,9 @@ class CryptoAPITrading:
         self.api_secret = API_SECRET
         self.base_url = "https://api.bitso.com"
         self.quote_currency = QUOTE_CURRENCY
+        self.primary_currency = QUOTE_CURRENCY
+        self.secondary_currency = SECONDARY_CURRENCY
+        self._last_secondary_rate = None
 
         self.dca_levels_triggered = {}  # Track DCA levels for each crypto
         self.dca_levels = list(DCA_LEVELS)  # Hard DCA triggers (percent PnL)
@@ -432,6 +440,10 @@ class CryptoAPITrading:
                     data = {}
                 # Back-compat upgrades
                 data.setdefault("total_realized_profit_usd", 0.0)
+                data.setdefault("total_realized_profit_quote", data.get("total_realized_profit_usd", 0.0))
+                data.setdefault("total_realized_profit_secondary", 0.0)
+                data.setdefault("quote_currency", self.quote_currency)
+                data.setdefault("secondary_currency", self.secondary_currency)
                 data.setdefault("last_updated_ts", time.time())
                 data.setdefault("open_positions", {})   # { "BTC": {"usd_cost": float, "qty": float} }
                 data.setdefault("pending_orders", {})   # { "<order_id>": {...} }
@@ -440,6 +452,10 @@ class CryptoAPITrading:
             pass
         return {
             "total_realized_profit_usd": 0.0,
+            "total_realized_profit_quote": 0.0,
+            "total_realized_profit_secondary": 0.0,
+            "quote_currency": self.quote_currency,
+            "secondary_currency": self.secondary_currency,
             "last_updated_ts": time.time(),
             "open_positions": {},
             "pending_orders": {},
@@ -667,6 +683,10 @@ class CryptoAPITrading:
             if not isinstance(self._pnl_ledger, dict):
                 self._pnl_ledger = {}
             self._pnl_ledger.setdefault("total_realized_profit_usd", 0.0)
+            self._pnl_ledger.setdefault("total_realized_profit_quote", self._pnl_ledger.get("total_realized_profit_usd", 0.0))
+            self._pnl_ledger.setdefault("total_realized_profit_secondary", 0.0)
+            self._pnl_ledger.setdefault("quote_currency", self.quote_currency)
+            self._pnl_ledger.setdefault("secondary_currency", self.secondary_currency)
             self._pnl_ledger.setdefault("open_positions", {})
             self._pnl_ledger.setdefault("pending_orders", {})
         except Exception:
@@ -676,7 +696,7 @@ class CryptoAPITrading:
         position_cost_used = None
         position_cost_after = None
 
-        # --- Exact USD-based accounting (your design) ---
+        # --- Exact quote-currency-based accounting ---
         if base and (buying_power_delta is not None):
             try:
                 bp_delta = float(buying_power_delta)
@@ -701,11 +721,11 @@ class CryptoAPITrading:
                     q = float(qty or 0.0)
 
                     if side_l == "buy":
-                        usd_used = -bp_delta  # buying power drops on buys
-                        if usd_used < 0.0:
-                            usd_used = 0.0
+                        quote_used = -bp_delta  # buying power drops on buys
+                        if quote_used < 0.0:
+                            quote_used = 0.0
 
-                        pos["usd_cost"] = float(pos_usd_cost) + float(usd_used)
+                        pos["usd_cost"] = float(pos_usd_cost) + float(quote_used)
                         pos["qty"] = float(pos_qty) + float(q if q > 0.0 else 0.0)
 
                         position_cost_after = float(pos["usd_cost"])
@@ -714,9 +734,9 @@ class CryptoAPITrading:
                         self._save_pnl_ledger()
 
                     elif side_l == "sell":
-                        usd_got = bp_delta  # buying power rises on sells
-                        if usd_got < 0.0:
-                            usd_got = 0.0
+                        quote_got = bp_delta  # buying power rises on sells
+                        if quote_got < 0.0:
+                            quote_got = 0.0
 
                         # If partial sell ever happens, allocate cost pro-rata by qty.
                         if pos_qty > 0.0 and q > 0.0:
@@ -731,8 +751,15 @@ class CryptoAPITrading:
                         position_cost_used = float(cost_used)
                         position_cost_after = float(pos.get("usd_cost", 0.0) or 0.0)
 
-                        realized = float(usd_got) - float(cost_used)
-                        self._pnl_ledger["total_realized_profit_usd"] = float(self._pnl_ledger.get("total_realized_profit_usd", 0.0) or 0.0) + float(realized)
+                        realized = float(quote_got) - float(cost_used)
+                        realized_quote = float(realized)
+                        self._pnl_ledger["total_realized_profit_quote"] = float(self._pnl_ledger.get("total_realized_profit_quote", 0.0) or 0.0) + float(realized_quote)
+                        self._pnl_ledger["total_realized_profit_usd"] = float(self._pnl_ledger.get("total_realized_profit_usd", 0.0) or 0.0) + float(realized_quote)
+
+                        secondary_rate = getattr(self, "_last_secondary_rate", None)
+                        if secondary_rate:
+                            realized_secondary = float(realized_quote) * float(secondary_rate)
+                            self._pnl_ledger["total_realized_profit_secondary"] = float(self._pnl_ledger.get("total_realized_profit_secondary", 0.0) or 0.0) + float(realized_secondary)
 
                         # Clean up tiny dust
                         if float(pos.get("qty", 0.0) or 0.0) <= 1e-12 or float(pos.get("usd_cost", 0.0) or 0.0) <= 1e-6:
@@ -748,7 +775,12 @@ class CryptoAPITrading:
             try:
                 fee_val = float(fees_usd) if fees_usd is not None else 0.0
                 realized = (float(price) - float(avg_cost_basis)) * float(qty) - fee_val
+                self._pnl_ledger["total_realized_profit_quote"] = float(self._pnl_ledger.get("total_realized_profit_quote", 0.0)) + float(realized)
                 self._pnl_ledger["total_realized_profit_usd"] = float(self._pnl_ledger.get("total_realized_profit_usd", 0.0)) + float(realized)
+                secondary_rate = getattr(self, "_last_secondary_rate", None)
+                if secondary_rate:
+                    realized_secondary = float(realized) * float(secondary_rate)
+                    self._pnl_ledger["total_realized_profit_secondary"] = float(self._pnl_ledger.get("total_realized_profit_secondary", 0.0) or 0.0) + float(realized_secondary)
                 self._save_pnl_ledger()
             except Exception:
                 realized = None
@@ -763,13 +795,21 @@ class CryptoAPITrading:
             "avg_cost_basis": avg_cost_basis,
             "pnl_pct": pnl_pct,
             "fees_usd": fees_usd,
+            "fees_quote": fees_usd,
             "realized_profit_usd": realized,
+            "realized_profit_quote": realized,
+            "realized_profit_secondary": (float(realized) * float(getattr(self, "_last_secondary_rate", 0.0))) if realized is not None and getattr(self, "_last_secondary_rate", None) else None,
+            "quote_currency": self.quote_currency,
+            "secondary_currency": self.secondary_currency if getattr(self, "_last_secondary_rate", None) else None,
+            "secondary_rate": float(getattr(self, "_last_secondary_rate", 0.0)) if getattr(self, "_last_secondary_rate", None) else None,
             "order_id": order_id,
             "buying_power_before": float(buying_power_before) if buying_power_before is not None else None,
             "buying_power_after": float(buying_power_after) if buying_power_after is not None else None,
             "buying_power_delta": float(buying_power_delta) if buying_power_delta is not None else None,
             "position_cost_used_usd": float(position_cost_used) if position_cost_used is not None else None,
             "position_cost_after_usd": float(position_cost_after) if position_cost_after is not None else None,
+            "position_cost_used_quote": float(position_cost_used) if position_cost_used is not None else None,
+            "position_cost_after_quote": float(position_cost_after) if position_cost_after is not None else None,
         }
         self._append_jsonl(TRADE_HISTORY_PATH, entry)
 
@@ -1886,6 +1926,11 @@ class CryptoAPITrading:
         cost_basis = self.cost_basis
         # Fetch current prices
         symbols = [f"{holding['asset_code']}-{self.quote_currency}" for holding in holdings.get("results", [])]
+        fx_symbol = None
+        if self.quote_currency == PRIMARY_CURRENCY and self.secondary_currency == SECONDARY_CURRENCY:
+            fx_symbol = f"{self.secondary_currency}-{self.quote_currency}"
+            if fx_symbol not in symbols:
+                symbols.append(fx_symbol)
 
         # ALSO fetch prices for tracked coins even if not currently held (so GUI can show bid/ask lines)
         for s in crypto_symbols:
@@ -1894,6 +1939,18 @@ class CryptoAPITrading:
                 symbols.append(full)
 
         current_buy_prices, current_sell_prices, valid_symbols = self.get_price(symbols)
+        secondary_rate = None
+        if fx_symbol:
+            ask = float(current_buy_prices.get(fx_symbol, 0.0) or 0.0)
+            bid = float(current_sell_prices.get(fx_symbol, 0.0) or 0.0)
+            if ask > 0.0 and bid > 0.0:
+                mxn_per_usd = (ask + bid) / 2.0
+            else:
+                mxn_per_usd = ask or bid
+            if mxn_per_usd and mxn_per_usd > 0.0:
+                secondary_rate = 1.0 / mxn_per_usd
+        if secondary_rate:
+            self._last_secondary_rate = secondary_rate
 
         # Calculate total account value (robust: never drop a held coin to $0 on transient API misses)
         snapshot_ok = True
@@ -1965,10 +2022,30 @@ class CryptoAPITrading:
                 "percent_in_trade": float(in_use),
             }
 
+        total_account_value_secondary = None
+        holdings_sell_value_secondary = None
+        buying_power_secondary = None
+        if getattr(self, "_last_secondary_rate", None):
+            total_account_value_secondary = total_account_value * self._last_secondary_rate
+            holdings_sell_value_secondary = holdings_sell_value * self._last_secondary_rate
+            buying_power_secondary = buying_power * self._last_secondary_rate
+
         os.system('cls' if os.name == 'nt' else 'clear')
         print("\n--- Account Summary ---")
-        print(f"Total Account Value: ${total_account_value:.2f}")
-        print(f"Holdings Value: ${holdings_sell_value:.2f}")
+        if total_account_value_secondary is not None:
+            print(
+                f"Total Account Value: {self.quote_currency} {total_account_value:.2f} "
+                f"({self.secondary_currency} {total_account_value_secondary:.2f})"
+            )
+        else:
+            print(f"Total Account Value: {self.quote_currency} {total_account_value:.2f}")
+        if holdings_sell_value_secondary is not None:
+            print(
+                f"Holdings Value: {self.quote_currency} {holdings_sell_value:.2f} "
+                f"({self.secondary_currency} {holdings_sell_value_secondary:.2f})"
+            )
+        else:
+            print(f"Holdings Value: {self.quote_currency} {holdings_sell_value:.2f}")
         print(f"Percent In Trade: {in_use:.2f}%")
         print(
             f"Trailing PM: start +{self.pm_start_pct_no_dca:.2f}% (no DCA) / +{self.pm_start_pct_with_dca:.2f}% (with DCA) "
@@ -2109,6 +2186,8 @@ class CryptoAPITrading:
                 "gain_loss_pct_buy": gain_loss_percentage_buy,
                 "gain_loss_pct_sell": gain_loss_percentage_sell,
                 "value_usd": value,
+                "value_quote": value,
+                "value_secondary": (value * self._last_secondary_rate) if getattr(self, "_last_secondary_rate", None) else None,
                 "dca_triggered_stages": int(triggered_levels_count),
                 "next_dca_display": next_dca_display,
                 "dca_line_price": float(dca_line_price) if dca_line_price else 0.0,
@@ -2126,7 +2205,7 @@ class CryptoAPITrading:
                 f"  |  DCA: {color}{dca_line_pct:+.2f}%{Style.RESET_ALL} @ {self._fmt_price(current_buy_price)} (Line: {dca_line_price_disp} {dca_line_source} | Next: {next_dca_display})"
                 f"  |  Gain/Loss SELL: {color2}{gain_loss_percentage_sell:.2f}%{Style.RESET_ALL} @ {self._fmt_price(current_sell_price)}"
                 f"  |  DCA Levels Triggered: {triggered_levels}"
-                f"  |  Trade Value: ${value:.2f}"
+                f"  |  Trade Value: {self.quote_currency} {value:.2f}"
             )
 
 
@@ -2273,10 +2352,26 @@ class CryptoAPITrading:
 
                 print(f"  DCAing {symbol} (stage {current_stage + 1}) via {reason}.")
 
-                print(f"  Current Value: ${value:.2f}")
+                if getattr(self, "_last_secondary_rate", None):
+                    print(
+                        f"  Current Value: {self.quote_currency} {value:.2f} "
+                        f"({self.secondary_currency} {value * self._last_secondary_rate:.2f})"
+                    )
+                else:
+                    print(f"  Current Value: {self.quote_currency} {value:.2f}")
                 dca_amount = value * float(DCA_MULTIPLIER or 0.0)
-                print(f"  DCA Amount: ${dca_amount:.2f}")
-                print(f"  Buying Power: ${buying_power:.2f}")
+                if getattr(self, "_last_secondary_rate", None):
+                    print(
+                        f"  DCA Amount: {self.quote_currency} {dca_amount:.2f} "
+                        f"({self.secondary_currency} {dca_amount * self._last_secondary_rate:.2f})"
+                    )
+                    print(
+                        f"  Buying Power: {self.quote_currency} {buying_power:.2f} "
+                        f"({self.secondary_currency} {buying_power * self._last_secondary_rate:.2f})"
+                    )
+                else:
+                    print(f"  DCA Amount: {self.quote_currency} {dca_amount:.2f}")
+                    print(f"  Buying Power: {self.quote_currency} {buying_power:.2f}")
 
 
                 recent_dca = self._dca_window_count(symbol)
@@ -2351,6 +2446,8 @@ class CryptoAPITrading:
                     "gain_loss_pct_buy": 0.0,
                     "gain_loss_pct_sell": 0.0,
                     "value_usd": 0.0,
+                    "value_quote": 0.0,
+                    "value_secondary": 0.0,
                     "dca_triggered_stages": int(len(self.dca_levels_triggered.get(sym, []))),
                     "next_dca_display": "",
                     "dca_line_price": 0.0,
@@ -2422,10 +2519,18 @@ class CryptoAPITrading:
                 self.trailing_pm.pop(base_symbol, None)
 
 
-                print(
-                    f"Starting new trade for {full_symbol} (AI start signal long={buy_count}, short={sell_count}). "
-                    f"Allocating ${allocation_in_usd:.2f}."
-                )
+                if getattr(self, "_last_secondary_rate", None):
+                    secondary_alloc = allocation_in_usd * self._last_secondary_rate
+                    print(
+                        f"Starting new trade for {full_symbol} (AI start signal long={buy_count}, short={sell_count}). "
+                        f"Allocating {self.quote_currency} {allocation_in_usd:.2f} "
+                        f"({self.secondary_currency} {secondary_alloc:.2f})."
+                    )
+                else:
+                    print(
+                        f"Starting new trade for {full_symbol} (AI start signal long={buy_count}, short={sell_count}). "
+                        f"Allocating {self.quote_currency} {allocation_in_usd:.2f}."
+                    )
                 time.sleep(5)
                 holdings = self.get_holdings()
                 holding_full_symbols = [f"{h['asset_code']}-{self.quote_currency}" for h in holdings.get("results", [])]
@@ -2451,11 +2556,17 @@ class CryptoAPITrading:
                 "timestamp": time.time(),
                 "account": {
                     "total_account_value": total_account_value,
+                    "total_account_value_secondary": total_account_value_secondary,
                     "buying_power": buying_power,
+                    "buying_power_secondary": buying_power_secondary,
                     "buying_power_currency": acct.get("buying_power_currency", self.quote_currency) if isinstance(acct, dict) else self.quote_currency,
                     "holdings_sell_value": holdings_sell_value,
+                    "holdings_sell_value_secondary": holdings_sell_value_secondary,
                     "holdings_buy_value": holdings_buy_value,
                     "percent_in_trade": in_use,
+                    "primary_currency": self.quote_currency,
+                    "secondary_currency": self.secondary_currency if getattr(self, "_last_secondary_rate", None) else None,
+                    "secondary_rate": float(getattr(self, "_last_secondary_rate", 0.0)) if getattr(self, "_last_secondary_rate", None) else None,
                     # trailing PM config (matches what's printed above current trades)
                     "pm_start_pct_no_dca": float(getattr(self, "pm_start_pct_no_dca", 0.0)),
                     "pm_start_pct_with_dca": float(getattr(self, "pm_start_pct_with_dca", 0.0)),
