@@ -888,6 +888,100 @@ class CryptoAPITrading:
             "original": order,
         }
 
+    def _get_public_ticker(self, book: str) -> Optional[dict]:
+        if not book:
+            return None
+        try:
+            resp = requests.get(f"{self.base_url}/v3/ticker/?book={book}", timeout=10)
+            resp.raise_for_status()
+            data = resp.json()
+            if isinstance(data, dict) and data.get("success") is True:
+                return data.get("payload")
+            return data
+        except Exception:
+            return None
+
+    def _get_usd_to_mxn_rate(self) -> Optional[float]:
+        ticker = self._get_public_ticker("usd_mxn")
+        if not isinstance(ticker, dict):
+            return None
+        for key in ("last", "bid", "ask"):
+            try:
+                val = float(ticker.get(key, 0.0) or 0.0)
+                if val > 0.0:
+                    return val
+            except Exception:
+                continue
+        return None
+
+    def _symbol_to_book(self, symbol: str) -> str:
+        sym = str(symbol or "").strip().lower()
+        if not sym:
+            return ""
+        if "-" in sym:
+            base, quote = sym.split("-", 1)
+        elif "_" in sym:
+            base, quote = sym.split("_", 1)
+        else:
+            base, quote = sym, self.quote_currency.lower()
+        return f"{base.lower()}_{quote.lower()}"
+
+    def _book_to_symbol(self, book: str) -> str:
+        b = str(book or "").strip().lower()
+        if "_" in b:
+            base, quote = b.split("_", 1)
+            return f"{base.upper()}-{quote.upper()}"
+        return str(book or "").upper()
+
+    def _get_balance(self) -> Optional[dict]:
+        return self.make_api_request("GET", "/v3/balance/")
+
+    def _get_user_trades(self, book: str, order_id: Optional[str] = None) -> list:
+        if not book:
+            return []
+        path = f"/v3/user_trades/?book={book}"
+        if order_id:
+            path = f"{path}&oid={order_id}"
+        payload = self.make_api_request("GET", path)
+        if isinstance(payload, list):
+            return payload
+        if isinstance(payload, dict):
+            return payload.get("trades", []) or payload.get("payload", []) or []
+        return []
+
+    def _normalize_order(self, order: dict, book: str) -> dict:
+        oid = order.get("oid") or order.get("id") or order.get("order_id")
+        status = str(order.get("status") or order.get("state") or "").lower()
+        if status in {"completed", "filled"}:
+            state = "filled"
+        elif status in {"cancelled", "canceled", "rejected"}:
+            state = "canceled"
+        else:
+            state = status or "open"
+
+        executions = []
+        try:
+            for trade in self._get_user_trades(book, oid):
+                executions.append(
+                    {
+                        "quantity": trade.get("major") or trade.get("amount"),
+                        "effective_price": trade.get("price"),
+                        "fee": trade.get("fee_amount"),
+                        "timestamp": trade.get("created_at"),
+                    }
+                )
+        except Exception:
+            pass
+
+        return {
+            "id": oid,
+            "state": state,
+            "side": order.get("side"),
+            "created_at": order.get("created_at"),
+            "executions": executions,
+            "original": order,
+        }
+
     def _symbol_to_book(self, symbol: str) -> str:
         sym = str(symbol or "").strip().lower()
         if not sym:
