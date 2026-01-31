@@ -888,6 +888,74 @@ class CryptoAPITrading:
             "original": order,
         }
 
+    def _symbol_to_book(self, symbol: str) -> str:
+        sym = str(symbol or "").strip().lower()
+        if not sym:
+            return ""
+        if "-" in sym:
+            base, quote = sym.split("-", 1)
+        elif "_" in sym:
+            base, quote = sym.split("_", 1)
+        else:
+            base, quote = sym, self.quote_currency.lower()
+        return f"{base.lower()}_{quote.lower()}"
+
+    def _book_to_symbol(self, book: str) -> str:
+        b = str(book or "").strip().lower()
+        if "_" in b:
+            base, quote = b.split("_", 1)
+            return f"{base.upper()}-{quote.upper()}"
+        return str(book or "").upper()
+
+    def _get_balance(self) -> Optional[dict]:
+        return self.make_api_request("GET", "/v3/balance/")
+
+    def _get_user_trades(self, book: str, order_id: Optional[str] = None) -> list:
+        if not book:
+            return []
+        path = f"/v3/user_trades/?book={book}"
+        if order_id:
+            path = f"{path}&oid={order_id}"
+        payload = self.make_api_request("GET", path)
+        if isinstance(payload, list):
+            return payload
+        if isinstance(payload, dict):
+            return payload.get("trades", []) or payload.get("payload", []) or []
+        return []
+
+    def _normalize_order(self, order: dict, book: str) -> dict:
+        oid = order.get("oid") or order.get("id") or order.get("order_id")
+        status = str(order.get("status") or order.get("state") or "").lower()
+        if status in {"completed", "filled"}:
+            state = "filled"
+        elif status in {"cancelled", "canceled", "rejected"}:
+            state = "canceled"
+        else:
+            state = status or "open"
+
+        executions = []
+        try:
+            for trade in self._get_user_trades(book, oid):
+                executions.append(
+                    {
+                        "quantity": trade.get("major") or trade.get("amount"),
+                        "effective_price": trade.get("price"),
+                        "fee": trade.get("fee_amount"),
+                        "timestamp": trade.get("created_at"),
+                    }
+                )
+        except Exception:
+            pass
+
+        return {
+            "id": oid,
+            "state": state,
+            "side": order.get("side"),
+            "created_at": order.get("created_at"),
+            "executions": executions,
+            "original": order,
+        }
+
 
     @staticmethod
     def _read_long_dca_signal(symbol: str) -> int:
@@ -2222,6 +2290,7 @@ class CryptoAPITrading:
                 "account": {
                     "total_account_value": total_account_value,
                     "buying_power": buying_power,
+                    "buying_power_currency": acct.get("buying_power_currency", self.quote_currency) if isinstance(acct, dict) else self.quote_currency,
                     "holdings_sell_value": holdings_sell_value,
                     "holdings_buy_value": holdings_buy_value,
                     "percent_in_trade": in_use,
