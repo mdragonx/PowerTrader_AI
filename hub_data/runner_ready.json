@@ -1,7 +1,7 @@
 {
-  "timestamp": 1769821547.2732108,
+  "timestamp": 1769827252.3865955,
   "ready": false,
-  "stage": "training_required",
+  "stage": "warming_up",
   "ready_coins": [],
-  "total_coins": 23
+  "total_coins": 21
 }
