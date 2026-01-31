@@ -393,23 +393,32 @@ def _ensure_dir(path: str) -> None:
 
 
 
-def _fmt_money(x: float) -> str:
-    """Format a USD *amount* (account value, position value, etc.) as dollars with 2 decimals."""
+def _currency_prefix(code: Optional[str]) -> str:
+    cur = (code or "").upper().strip()
+    if cur == "USD":
+        return "$"
+    if cur == "MXN":
+        return "MXN$"
+    return f"{cur} " if cur else "$"
+
+
+def _fmt_money(x: float, currency: Optional[str] = None) -> str:
+    """Format a currency *amount* (account value, position value, etc.) with 2 decimals."""
     try:
-        return f"${float(x):,.2f}"
+        return f"{_currency_prefix(currency)}{float(x):,.2f}"
     except Exception:
         return "N/A"
 
 
-def _fmt_price(x: Any) -> str:
+def _fmt_price(x: Any, currency: Optional[str] = None) -> str:
     """
-    Format a USD *price/level* with dynamic decimals based on magnitude.
+    Format a currency *price/level* with dynamic decimals based on magnitude.
     Examples:
-      50234.12   -> $50,234.12
-      123.4567   -> $123.457
-      1.234567   -> $1.2346
-      0.06234567 -> $0.062346
-      0.00012345 -> $0.00012345
+      50234.12   -> MXN$50,234.12
+      123.4567   -> MXN$123.457
+      1.234567   -> MXN$1.2346
+      0.06234567 -> MXN$0.062346
+      0.00012345 -> MXN$0.00012345
     """
     try:
         if x is None:
@@ -442,7 +451,7 @@ def _fmt_price(x: Any) -> str:
         if "." in s:
             s = s.rstrip("0").rstrip(".")
 
-        return f"{sign}${s}"
+        return f"{sign}{_currency_prefix(currency)}{s}"
     except Exception:
         return "N/A"
 
@@ -456,6 +465,21 @@ def _fmt_pct(x: float) -> str:
 
 def _now_str() -> str:
     return time.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _read_primary_currency(trader_status_path: Optional[str]) -> str:
+    if trader_status_path and os.path.isfile(trader_status_path):
+        try:
+            status = _safe_read_json(trader_status_path)
+            acct = status.get("account", {}) if isinstance(status, dict) else {}
+            return str(
+                acct.get("primary_currency")
+                or acct.get("buying_power_currency")
+                or "MXN"
+            ).upper()
+        except Exception:
+            return "MXN"
+    return "MXN"
 
 
 # -----------------------------
@@ -828,9 +852,10 @@ class CandleChart(ttk.Frame):
         trail_line: Optional[float] = None,
         dca_line_price: Optional[float] = None,
         avg_cost_basis: Optional[float] = None,
+        currency: Optional[str] = None,
     ) -> None:
 
-
+        primary_currency = (currency or "MXN").upper()
 
         cfg = self.settings_getter()
 
@@ -1010,7 +1035,7 @@ class CandleChart(ttk.Frame):
                 self.ax.text(
                     1.01,
                     yy,
-                    f"{tag} {_fmt_price(yy)}",
+                    f"{tag} {_fmt_price(yy, primary_currency)}",
                     transform=trans,
                     ha="left",
                     va="center",
@@ -1299,6 +1324,8 @@ class AccountValueChart(ttk.Frame):
             return
         self._last_mtime = mtime
 
+        primary_currency = _read_primary_currency(self.trader_status_path)
+
 
         points: List[Tuple[float, float]] = []
 
@@ -1491,7 +1518,8 @@ class AccountValueChart(ttk.Frame):
 
         # Force 2 decimals on the y-axis labels (account value chart only)
         try:
-            self.ax.yaxis.set_major_formatter(FuncFormatter(lambda y, _pos: f"${y:,.2f}"))
+            prefix = _currency_prefix(primary_currency)
+            self.ax.yaxis.set_major_formatter(FuncFormatter(lambda y, _pos: f"{prefix}{y:,.2f}"))
         except Exception:
             pass
 
@@ -1531,7 +1559,7 @@ class AccountValueChart(ttk.Frame):
         self.ax.set_xlim(-0.5, (len(points) - 0.5) + 0.6)
 
         try:
-            self.ax.set_title(f"Account Value ({_fmt_money(ys[-1])})", color=DARK_FG)
+            self.ax.set_title(f"Account Value ({_fmt_money(ys[-1], primary_currency)})", color=DARK_FG)
         except Exception:
             self.ax.set_title("Account Value", color=DARK_FG)
 
@@ -3663,6 +3691,7 @@ class PowerTraderHub(tk.Tk):
                             trail_line=trail_line,
                             dca_line_price=dca_line_price,
                             avg_cost_basis=avg_cost_basis,
+                            currency=getattr(self, "_primary_currency", "MXN"),
                         )
                     except Exception:
                         pass
@@ -3738,20 +3767,36 @@ class PowerTraderHub(tk.Tk):
 
         # --- account summary (same info the trader prints above current trades) ---
         acct = data.get("account", {}) or {}
+        primary_currency = str(
+            acct.get("primary_currency")
+            or acct.get("buying_power_currency")
+            or "MXN"
+        ).upper()
+        secondary_currency = acct.get("secondary_currency")
+        self._primary_currency = primary_currency
+        self._secondary_currency = secondary_currency
         try:
             total_val = float(acct.get("total_account_value", 0.0) or 0.0)
+            total_val_secondary = acct.get("total_account_value_secondary", None)
 
             self._last_total_account_value = total_val
 
-            self.lbl_acct_total_value.config(
-                text=f"Total Account Value: {_fmt_money(acct.get('total_account_value', None))}"
-            )
-            self.lbl_acct_holdings_value.config(
-                text=f"Holdings Value: {_fmt_money(acct.get('holdings_sell_value', None))}"
-            )
-            self.lbl_acct_buying_power.config(
-                text=f"Buying Power: {_fmt_money(acct.get('buying_power', None))}"
-            )
+            total_txt = _fmt_money(acct.get("total_account_value", None), primary_currency)
+            if total_val_secondary is not None and secondary_currency:
+                total_txt += f" ({_fmt_money(total_val_secondary, secondary_currency)})"
+            self.lbl_acct_total_value.config(text=f"Total Account Value: {total_txt}")
+
+            holdings_txt = _fmt_money(acct.get("holdings_sell_value", None), primary_currency)
+            holdings_secondary = acct.get("holdings_sell_value_secondary", None)
+            if holdings_secondary is not None and secondary_currency:
+                holdings_txt += f" ({_fmt_money(holdings_secondary, secondary_currency)})"
+            self.lbl_acct_holdings_value.config(text=f"Holdings Value: {holdings_txt}")
+
+            buying_txt = _fmt_money(acct.get("buying_power", None), primary_currency)
+            buying_secondary = acct.get("buying_power_secondary", None)
+            if buying_secondary is not None and secondary_currency:
+                buying_txt += f" ({_fmt_money(buying_secondary, secondary_currency)})"
+            self.lbl_acct_buying_power.config(text=f"Buying Power: {buying_txt}")
 
             pit = acct.get("percent_in_trade", None)
             try:
@@ -3887,7 +3932,8 @@ class PowerTraderHub(tk.Tk):
             except Exception:
                 continue
 
-            value = pos.get("value_usd", 0.0)
+            primary_currency = getattr(self, "_primary_currency", "MXN")
+            value = pos.get("value_quote", pos.get("value_usd", 0.0))
             avg_cost = pos.get("avg_cost_basis", 0.0)
 
             buy_price = pos.get("current_buy_price", 0.0)
@@ -3933,16 +3979,16 @@ class PowerTraderHub(tk.Tk):
                 values=(
                     coin,
                     f"{qty:.8f}".rstrip("0").rstrip("."),
-                    _fmt_money(value),       # position value (USD)
-                    _fmt_price(avg_cost),    # per-unit price (USD) -> dynamic decimals
-                    _fmt_price(buy_price),
+                    _fmt_money(value, primary_currency),       # position value
+                    _fmt_price(avg_cost, primary_currency),    # per-unit price -> dynamic decimals
+                    _fmt_price(buy_price, primary_currency),
                     _fmt_pct(buy_pnl),
-                    _fmt_price(sell_price),
+                    _fmt_price(sell_price, primary_currency),
                     _fmt_pct(sell_pnl),
                     dca_stages,
                     dca_24h_display,
                     next_dca,
-                    _fmt_price(trail_line),  # trail line is a price level
+                    _fmt_price(trail_line, primary_currency),  # trail line is a price level
                 ),
             )
 
@@ -3969,8 +4015,14 @@ class PowerTraderHub(tk.Tk):
         if not data:
             self.lbl_pnl.config(text="Total realized: N/A")
             return
-        total = float(data.get("total_realized_profit_usd", 0.0))
-        self.lbl_pnl.config(text=f"Total realized: {_fmt_money(total)}")
+        total = float(data.get("total_realized_profit_quote", data.get("total_realized_profit_usd", 0.0)))
+        quote_currency = data.get("quote_currency") or getattr(self, "_primary_currency", "MXN")
+        total_txt = _fmt_money(total, quote_currency)
+        secondary_total = data.get("total_realized_profit_secondary", None)
+        secondary_currency = data.get("secondary_currency") or getattr(self, "_secondary_currency", None)
+        if secondary_total is not None and secondary_currency:
+            total_txt += f" ({_fmt_money(secondary_total, secondary_currency)})"
+        self.lbl_pnl.config(text=f"Total realized: {total_txt}")
 
 
     def _refresh_trade_history(self) -> None:
@@ -4012,11 +4064,12 @@ class PowerTraderHub(tk.Tk):
                 sym = obj.get("symbol", "")
                 qty = obj.get("qty", "")
                 px = obj.get("price", None)
-                pnl = obj.get("realized_profit_usd", None)
+                pnl = obj.get("realized_profit_quote", obj.get("realized_profit_usd", None))
+                quote_currency = obj.get("quote_currency") or getattr(self, "_primary_currency", "MXN")
 
                 pnl_pct = obj.get("pnl_pct", None)
 
-                px_txt = _fmt_price(px) if px is not None else "N/A"
+                px_txt = _fmt_price(px, quote_currency) if px is not None else "N/A"
 
                 action = side
                 if tag:
@@ -4041,7 +4094,7 @@ class PowerTraderHub(tk.Tk):
 
                 if pnl is not None:
                     try:
-                        txt += f" | realized={float(pnl):+.2f}"
+                        txt += f" | realized={_fmt_money(float(pnl), quote_currency)}"
                     except Exception:
                         txt += f" | realized={pnl}"
 
@@ -4583,10 +4636,15 @@ class PowerTraderHub(tk.Tk):
             if per_coin < 0.5:
                 per_coin = 0.5
 
+            primary_currency = getattr(self, "_primary_currency", "MXN")
             if total_val > 0.0:
-                start_alloc_hint_var.set(f"≈ {_fmt_money(per_coin)} per coin (min $0.50)")
+                start_alloc_hint_var.set(
+                    f"≈ {_fmt_money(per_coin, primary_currency)} per coin (min {_fmt_money(0.5, primary_currency)})"
+                )
             else:
-                start_alloc_hint_var.set("≈ $0.50 min per coin (needs account value)")
+                start_alloc_hint_var.set(
+                    f"≈ {_fmt_money(0.5, primary_currency)} min per coin (needs account value)"
+                )
 
         _update_start_alloc_hint()
         start_alloc_pct_var.trace_add("write", _update_start_alloc_hint)
