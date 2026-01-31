@@ -888,6 +888,74 @@ class CryptoAPITrading:
             "original": order,
         }
 
+    def _symbol_to_book(self, symbol: str) -> str:
+        sym = str(symbol or "").strip().lower()
+        if not sym:
+            return ""
+        if "-" in sym:
+            base, quote = sym.split("-", 1)
+        elif "_" in sym:
+            base, quote = sym.split("_", 1)
+        else:
+            base, quote = sym, self.quote_currency.lower()
+        return f"{base.lower()}_{quote.lower()}"
+
+    def _book_to_symbol(self, book: str) -> str:
+        b = str(book or "").strip().lower()
+        if "_" in b:
+            base, quote = b.split("_", 1)
+            return f"{base.upper()}-{quote.upper()}"
+        return str(book or "").upper()
+
+    def _get_balance(self) -> Optional[dict]:
+        return self.make_api_request("GET", "/v3/balance/")
+
+    def _get_user_trades(self, book: str, order_id: Optional[str] = None) -> list:
+        if not book:
+            return []
+        path = f"/v3/user_trades/?book={book}"
+        if order_id:
+            path = f"{path}&oid={order_id}"
+        payload = self.make_api_request("GET", path)
+        if isinstance(payload, list):
+            return payload
+        if isinstance(payload, dict):
+            return payload.get("trades", []) or payload.get("payload", []) or []
+        return []
+
+    def _normalize_order(self, order: dict, book: str) -> dict:
+        oid = order.get("oid") or order.get("id") or order.get("order_id")
+        status = str(order.get("status") or order.get("state") or "").lower()
+        if status in {"completed", "filled"}:
+            state = "filled"
+        elif status in {"cancelled", "canceled", "rejected"}:
+            state = "canceled"
+        else:
+            state = status or "open"
+
+        executions = []
+        try:
+            for trade in self._get_user_trades(book, oid):
+                executions.append(
+                    {
+                        "quantity": trade.get("major") or trade.get("amount"),
+                        "effective_price": trade.get("price"),
+                        "fee": trade.get("fee_amount"),
+                        "timestamp": trade.get("created_at"),
+                    }
+                )
+        except Exception:
+            pass
+
+        return {
+            "id": oid,
+            "state": state,
+            "side": order.get("side"),
+            "created_at": order.get("created_at"),
+            "executions": executions,
+            "original": order,
+        }
+
 
     @staticmethod
     def _read_long_dca_signal(symbol: str) -> int:
@@ -1170,7 +1238,7 @@ class CryptoAPITrading:
             hashlib.sha256,
         ).hexdigest()
         return {
-            "Authorization": f"Bitso {self.api_key}:{nonce}:{signature}",
+            "Authorization": f"Bitso {self.api_key}:{signature}:{nonce}",
             "Content-Type": "application/json",
         }
 
@@ -1205,49 +1273,16 @@ class CryptoAPITrading:
     def get_account(self) -> Any:
         balances = self._get_balance() or {}
         buying_power = 0.0
-        buying_power_currency = self.quote_currency
-        balances_list = balances.get("balances", []) if isinstance(balances, dict) else []
-
-        def _balance_amount(entry: dict) -> float:
-            try:
-                available = float(entry.get("available", 0.0) or 0.0)
-                locked = float(entry.get("locked", 0.0) or 0.0)
-                total = available + locked
-                if total <= 0.0:
-                    total = float(entry.get("total", 0.0) or 0.0)
-                return total
-            except Exception:
-                return 0.0
-
         try:
-            for bal in balances_list:
+            for bal in balances.get("balances", []) if isinstance(balances, dict) else []:
                 if str(bal.get("currency", "")).upper() == self.quote_currency:
-                    buying_power = _balance_amount(bal)
+                    available = float(bal.get("available", 0.0) or 0.0)
+                    locked = float(bal.get("locked", 0.0) or 0.0)
+                    buying_power = available + locked
                     break
-
-            if buying_power <= 0.0:
-                for fallback_currency in ("MXN", "USD"):
-                    for bal in balances_list:
-                        if str(bal.get("currency", "")).upper() == fallback_currency:
-                            buying_power = _balance_amount(bal)
-                            buying_power_currency = fallback_currency
-                            break
-                    if buying_power > 0.0:
-                        break
-
-            if buying_power <= 0.0 and balances_list:
-                for bal in balances_list:
-                    buying_power = _balance_amount(bal)
-                    if buying_power > 0.0:
-                        buying_power_currency = str(bal.get("currency", "")).upper() or buying_power_currency
-                        break
         except Exception:
             buying_power = 0.0
-        return {
-            "buying_power": buying_power,
-            "buying_power_currency": buying_power_currency,
-            "raw": balances,
-        }
+        return {"buying_power": buying_power, "raw": balances}
 
     def get_holdings(self) -> Any:
         balances = self._get_balance() or {}
