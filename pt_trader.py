@@ -1170,7 +1170,7 @@ class CryptoAPITrading:
             hashlib.sha256,
         ).hexdigest()
         return {
-            "Authorization": f"Bitso {self.api_key}:{nonce}:{signature}",
+            "Authorization": f"Bitso {self.api_key}:{signature}:{nonce}",
             "Content-Type": "application/json",
         }
 
